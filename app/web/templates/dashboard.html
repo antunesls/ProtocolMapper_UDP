@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% set active_page = "dashboard" %}
+
+{% block title %}Dashboard — ProtocolMapper{% endblock %}
+{% block heading %}Live Traffic Dashboard{% endblock %}
+
+{% block content %}
+<div x-data="dashboard('{{ ws_url }}')" x-init="connect()">
+
+  <!-- Stats bar -->
+  <div class="grid grid-cols-3 gap-4 mb-6">
+    <div class="bg-white rounded-xl shadow p-4 text-center">
+      <div class="text-3xl font-bold text-blue-600" x-text="stats.total">0</div>
+      <div class="text-sm text-gray-500 mt-1">Total Packets</div>
+    </div>
+    <div class="bg-white rounded-xl shadow p-4 text-center">
+      <div class="text-3xl font-bold text-green-600" x-text="stats.matched">0</div>
+      <div class="text-sm text-gray-500 mt-1">Matched</div>
+    </div>
+    <div class="bg-white rounded-xl shadow p-4 text-center">
+      <div class="text-3xl font-bold text-red-500" x-text="stats.unmatched">0</div>
+      <div class="text-sm text-gray-500 mt-1">Unmatched</div>
+    </div>
+  </div>
+
+  <!-- Connection status -->
+  <div class="mb-3 flex items-center gap-2 text-sm">
+    <span :class="connected ? 'bg-green-400' : 'bg-red-400'"
+          class="w-2.5 h-2.5 rounded-full inline-block"></span>
+    <span x-text="connected ? 'Connected — live updates active' : 'Reconnecting…'" class="text-gray-500"></span>
+    <button @click="clearLogs()"
+            class="ml-auto text-xs text-gray-400 hover:text-red-500 transition">Clear</button>
+  </div>
+
+  <!-- Log table -->
+  <div class="bg-white rounded-xl shadow overflow-hidden">
+    <div class="overflow-auto max-h-[52vh]">
+      <table class="w-full text-sm text-left">
+        <thead class="bg-gray-50 text-xs uppercase text-gray-500 sticky top-0">
+          <tr>
+            <th class="px-4 py-3 w-44">Timestamp</th>
+            <th class="px-4 py-3 w-12">Dir</th>
+            <th class="px-4 py-3">Source</th>
+            <th class="px-4 py-3">Raw Data</th>
+            <th class="px-4 py-3">Rule</th>
+            <th class="px-4 py-3">Result</th>
+            <th class="px-4 py-3 text-right">ms</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="(entry, idx) in logs" :key="idx">
+            <tr class="border-t border-gray-100 hover:bg-gray-50 transition">
+              <td class="px-4 py-2 text-gray-400 font-mono text-xs"
+                  x-text="entry.timestamp?.slice(0,19).replace('T',' ')"></td>
+              <td class="px-4 py-2">
+                <span :class="entry.direction === 'IN' ? 'badge-in' : 'badge-out'"
+                      class="text-xs font-semibold px-1.5 py-0.5 rounded"
+                      x-text="entry.direction"></span>
+              </td>
+              <td class="px-4 py-2 font-mono text-xs" x-text="entry.source_addr"></td>
+              <td class="px-4 py-2 font-mono text-xs max-w-xs truncate"
+                  :title="entry.raw_data" x-text="entry.raw_data"></td>
+              <td class="px-4 py-2 text-xs" x-text="entry.matched_rule ?? '—'"></td>
+              <td class="px-4 py-2 text-xs max-w-xs truncate"
+                  :title="entry.output_result" x-text="entry.output_result ?? '—'"></td>
+              <td class="px-4 py-2 text-xs text-right text-gray-400"
+                  x-text="entry.latency_ms ?? ''"></td>
+            </tr>
+          </template>
+          <tr x-show="logs.length === 0">
+            <td colspan="7" class="px-4 py-8 text-center text-gray-400">
+              Waiting for UDP packets…
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<script>
+function dashboard(wsUrl) {
+  return {
+    logs: [],
+    connected: false,
+    ws: null,
+    stats: { total: 0, matched: 0, unmatched: 0 },
+
+    connect() {
+      if (this.ws) this.ws.close();
+      this.ws = new WebSocket(wsUrl);
+
+      this.ws.onopen = () => {
+        this.connected = true;
+        // Fetch recent logs on connect
+        fetch('/api/logs?n=200')
+          .then(r => r.json())
+          .then(data => {
+            this.logs = data.reverse();
+            this._recalc();
+          });
+      };
+
+      this.ws.onmessage = (evt) => {
+        const entry = JSON.parse(evt.data);
+        this.logs.unshift(entry);
+        if (this.logs.length > 500) this.logs = this.logs.slice(0, 500);
+        if (entry.direction === 'IN') {
+          this.stats.total++;
+          if (entry.matched_rule) this.stats.matched++;
+          else this.stats.unmatched++;
+        }
+      };
+
+      this.ws.onclose = () => {
+        this.connected = false;
+        setTimeout(() => this.connect(), 3000);
+      };
+    },
+
+    clearLogs() {
+      this.logs = [];
+      this.stats = { total: 0, matched: 0, unmatched: 0 };
+    },
+
+    _recalc() {
+      this.stats = { total: 0, matched: 0, unmatched: 0 };
+      for (const e of this.logs) {
+        if (e.direction === 'IN') {
+          this.stats.total++;
+          if (e.matched_rule) this.stats.matched++;
+          else this.stats.unmatched++;
+        }
+      }
+    }
+  };
+}
+</script>
+{% endblock %}

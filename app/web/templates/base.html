@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en" x-data="{ sidebarOpen: true }">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}ProtocolMapper UDP{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    [x-cloak] { display: none !important; }
+    .badge-in  { @apply bg-blue-100 text-blue-800; }
+    .badge-out { @apply bg-green-100 text-green-800; }
+  </style>
+</head>
+<body class="bg-gray-100 text-gray-900 flex h-screen overflow-hidden">
+
+  <!-- Sidebar -->
+  <aside class="bg-gray-900 text-white w-56 flex-shrink-0 flex flex-col">
+    <div class="px-6 py-5 text-lg font-bold tracking-wide border-b border-gray-700">
+      🔀 ProtocolMapper
+    </div>
+    <nav class="flex-1 flex flex-col gap-1 p-4">
+      <a href="/"
+         class="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-700 transition
+                {% if active_page == 'dashboard' %}bg-gray-700{% endif %}">
+        📊 Dashboard
+      </a>
+      <a href="/mappings"
+         class="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-700 transition
+                {% if active_page == 'mappings' %}bg-gray-700{% endif %}">
+        🗂 Mappings
+      </a>
+      <a href="/settings"
+         class="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-700 transition
+                {% if active_page == 'settings' %}bg-gray-700{% endif %}">
+        ⚙️ Settings
+      </a>
+    </nav>
+    <div class="px-4 py-3 text-xs text-gray-500 border-t border-gray-700">
+      <a href="/docs" target="_blank" class="hover:text-gray-300">Swagger Docs ↗</a>
+    </div>
+  </aside>
+
+  <!-- Main content -->
+  <main class="flex-1 overflow-auto flex flex-col">
+    <!-- Top bar -->
+    <header class="bg-white shadow px-8 py-4 flex items-center justify-between flex-shrink-0">
+      <h1 class="text-xl font-semibold">{% block heading %}Dashboard{% endblock %}</h1>
+      <span class="text-sm text-gray-400">UDP Gateway</span>
+    </header>
+
+    <!-- Page body -->
+    <div class="flex-1 p-8">
+      {% block content %}{% endblock %}
+    </div>
+  </main>
+
+</body>
+</html>

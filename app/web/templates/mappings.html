@@ -1,0 +1,472 @@
+{% extends "base.html" %}
+{% set active_page = "mappings" %}
+
+{% block title %}Mappings — ProtocolMapper{% endblock %}
+{% block heading %}Mapping Rules{% endblock %}
+
+{% block content %}
+<div x-data="mappingsApp()" x-init="load()">
+
+  <!-- Toolbar -->
+  <div class="flex justify-between items-center mb-4">
+    <p class="text-sm text-gray-500">
+      Define how incoming UDP commands are translated to output actions.
+    </p>
+    <button @click="openCreate()"
+            class="bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-2 rounded-lg transition">
+      + Add Mapping
+    </button>
+  </div>
+
+  <!-- Table -->
+  <div class="bg-white rounded-xl shadow overflow-hidden">
+    <table class="w-full text-sm text-left">
+      <thead class="bg-gray-50 text-xs uppercase text-gray-500">
+        <tr>
+          <th class="px-4 py-3">Name</th>
+          <th class="px-4 py-3">Input Pattern</th>
+          <th class="px-4 py-3">Type</th>
+          <th class="px-4 py-3">Output</th>
+          <th class="px-4 py-3 text-center">Enabled</th>
+          <th class="px-4 py-3 text-right">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <template x-for="m in mappings" :key="m.id">
+          <tr class="border-t border-gray-100 hover:bg-gray-50">
+            <td class="px-4 py-3 font-medium" x-text="m.name"></td>
+            <td class="px-4 py-3 font-mono text-xs" x-text="m.input_pattern"></td>
+            <td class="px-4 py-3">
+              <span class="bg-gray-100 text-gray-600 text-xs px-2 py-0.5 rounded"
+                    x-text="m.input_type"></span>
+            </td>
+            <td class="px-4 py-3">
+              <span :class="badgeClass(m.output_type)"
+                    class="text-xs font-semibold px-2 py-0.5 rounded uppercase"
+                    x-text="m.output_type"></span>
+            </td>
+            <td class="px-4 py-3 text-center">
+              <button @click="toggleEnabled(m)"
+                      :class="m.enabled ? 'bg-green-500' : 'bg-gray-300'"
+                      class="relative inline-flex h-5 w-9 items-center rounded-full transition">
+                <span :class="m.enabled ? 'translate-x-5' : 'translate-x-1'"
+                      class="inline-block h-3 w-3 rounded-full bg-white transition transform"></span>
+              </button>
+            </td>
+            <td class="px-4 py-3 text-right space-x-2">
+              <button @click="openEdit(m)"
+                      class="text-blue-600 hover:underline text-xs">Edit</button>
+              <button @click="remove(m.id)"
+                      class="text-red-500 hover:underline text-xs">Delete</button>
+            </td>
+          </tr>
+        </template>
+        <tr x-show="mappings.length === 0">
+          <td colspan="6" class="px-4 py-8 text-center text-gray-400">
+            No mappings yet. Click <strong>+ Add Mapping</strong> to create one.
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ================================================================
+       Modal
+       ================================================================ -->
+  <div x-show="modal" x-cloak
+       class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+    <div @click.outside="modal = false"
+         class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 space-y-4">
+      <h2 class="text-lg font-semibold" x-text="editId ? 'Edit Mapping' : 'New Mapping'"></h2>
+
+      <!-- Basic fields -->
+      <div class="space-y-3">
+        <div>
+          <label class="label">Name</label>
+          <input x-model="form.name" class="input" placeholder="My Rule" />
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="label">Input Pattern</label>
+            <input x-model="form.input_pattern" class="input" placeholder="0x01 / text / regex" />
+          </div>
+          <div>
+            <label class="label">Input Type</label>
+            <select x-model="form.input_type" class="input">
+              <option value="exact_hex">exact_hex</option>
+              <option value="exact_text">exact_text</option>
+              <option value="regex">regex</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label class="label">Output Type</label>
+          <select x-model="form.output_type" @change="onOutputTypeChange()" class="input">
+            <option value="http">HTTP — REST call</option>
+            <option value="udp">UDP — send packet</option>
+            <option value="tcp">TCP — send data</option>
+            <option value="mqtt">MQTT — publish</option>
+            <option value="ui24r">UI24R — Soundcraft mixer (WebSocket)</option>
+            <option value="sequence">Sequence — multiple actions</option>
+            <option value="ramp">Ramp — value transition over time</option>
+          </select>
+        </div>
+      </div>
+
+      <hr class="border-gray-200" />
+
+      <!-- ── SEQUENCE builder ─────────────────────────────────────── -->
+      <template x-if="form.output_type === 'sequence'">
+        <div class="space-y-3">
+          <div class="flex items-center justify-between">
+            <span class="text-sm font-medium text-gray-700">Actions</span>
+            <label class="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+              <input type="checkbox" x-model="seqParallel" class="rounded" />
+              Run in parallel
+            </label>
+          </div>
+
+          <template x-for="(act, idx) in seqActions" :key="idx">
+            <div class="border border-gray-200 rounded-xl p-3 space-y-2 bg-gray-50">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-semibold text-gray-500 uppercase">Action <span x-text="idx+1"></span></span>
+                <button @click="seqActions.splice(idx,1)" class="text-red-400 hover:text-red-600 text-xs">✕ Remove</button>
+              </div>
+              <div class="grid grid-cols-2 gap-2">
+                <div>
+                  <label class="label">Output Type</label>
+                  <select x-model="act.output_type" class="input text-xs">
+                    <option value="http">HTTP</option>
+                    <option value="udp">UDP</option>
+                    <option value="tcp">TCP</option>
+                    <option value="mqtt">MQTT</option>
+                    <option value="ui24r">UI24R</option>
+                    <option value="ramp">Ramp</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="label">Delay before (ms)</label>
+                  <input type="number" x-model.number="act.delay_before_ms" min="0" class="input text-xs" placeholder="0" />
+                </div>
+              </div>
+              <div>
+                <label class="label">Output Config (JSON)</label>
+                <textarea x-model="act.configJson" rows="4" class="input font-mono text-xs"
+                          :placeholder="JSON.stringify(defaultConfig(act.output_type), null, 2)"></textarea>
+                <p x-show="act.error" class="text-red-500 text-xs mt-1" x-text="act.error"></p>
+              </div>
+            </div>
+          </template>
+
+          <button @click="seqActions.push({ output_type:'ui24r', delay_before_ms:0, configJson: JSON.stringify(defaultConfig('ui24r'),null,2), error:'' })"
+                  class="w-full border-2 border-dashed border-blue-300 text-blue-500 hover:bg-blue-50 rounded-xl py-2 text-sm transition">
+            + Add Action
+          </button>
+        </div>
+      </template>
+
+      <!-- ── RAMP builder ─────────────────────────────────────────── -->
+      <template x-if="form.output_type === 'ramp'">
+        <div class="space-y-3">
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="label">From value</label>
+              <input type="number" step="0.001" x-model.number="ramp.from_value" class="input" placeholder="0.0" />
+            </div>
+            <div>
+              <label class="label">To value</label>
+              <input type="number" step="0.001" x-model.number="ramp.to_value" class="input" placeholder="0.8" />
+            </div>
+          </div>
+          <div class="grid grid-cols-3 gap-3">
+            <div>
+              <label class="label">Duration (ms)</label>
+              <input type="number" x-model.number="ramp.duration_ms" class="input" placeholder="5000" />
+            </div>
+            <div>
+              <label class="label">FPS</label>
+              <input type="number" x-model.number="ramp.fps" class="input" placeholder="25" />
+            </div>
+            <div>
+              <label class="label">Easing</label>
+              <select x-model="ramp.easing" class="input">
+                <option value="linear">Linear</option>
+                <option value="ease_in">Ease In (accelerate)</option>
+                <option value="ease_out">Ease Out (decelerate)</option>
+                <option value="ease_in_out">Ease In/Out (smooth)</option>
+              </select>
+            </div>
+          </div>
+          <p class="text-xs text-gray-400">
+            ≈ <span x-text="rampSteps()"></span> steps at
+            <span x-text="(1000/(ramp.fps||25)).toFixed(1)"></span> ms each.
+            Use <code class="bg-gray-100 px-1 rounded">{value}</code> in command strings.
+          </p>
+          <div class="border border-indigo-200 rounded-xl p-3 bg-indigo-50 space-y-2">
+            <span class="text-xs font-semibold text-indigo-700 uppercase">Action per step</span>
+            <div>
+              <label class="label">Output Type</label>
+              <select x-model="ramp.actionType" class="input">
+                <option value="http">HTTP</option>
+                <option value="udp">UDP</option>
+                <option value="tcp">TCP</option>
+                <option value="ui24r">UI24R</option>
+              </select>
+            </div>
+            <div>
+              <label class="label">Output Config (JSON) — use <code class="bg-white px-1 rounded">{value}</code></label>
+              <textarea x-model="ramp.actionConfigJson" rows="5" class="input font-mono text-xs"
+                        :placeholder="JSON.stringify(defaultConfig(ramp.actionType), null, 2)"></textarea>
+              <p x-show="ramp.error" class="text-red-500 text-xs mt-1" x-text="ramp.error"></p>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- ── UI24R helper fields ───────────────────────────────────── -->
+      <template x-if="form.output_type === 'ui24r'">
+        <div class="space-y-2">
+          <p class="text-xs text-gray-500">
+            Sends raw <code class="bg-gray-100 px-1 rounded">SETD^path^value</code> commands to the
+            Soundcraft mixer via WebSocket. Use <code class="bg-gray-100 px-1 rounded">${raw_data}</code>
+            and <code class="bg-gray-100 px-1 rounded">${source_ip}</code> as placeholders.
+          </p>
+          <label class="label">Output Config (JSON)</label>
+          <textarea x-model="configJson" rows="7" class="input font-mono text-xs"
+                    :placeholder="JSON.stringify(defaultConfig('ui24r'), null, 2)"></textarea>
+          <p x-show="configError" class="text-red-500 text-xs mt-1" x-text="configError"></p>
+        </div>
+      </template>
+
+      <!-- ── Generic JSON config (http / udp / tcp / mqtt) ─────────── -->
+      <template x-if="!['sequence','ramp','ui24r'].includes(form.output_type)">
+        <div>
+          <label class="label">
+            Output Config (JSON)
+            <span class="text-gray-400 font-normal ml-1">— use ${raw_data}, ${source_ip}</span>
+          </label>
+          <textarea x-model="configJson" rows="6" class="input font-mono text-xs"
+                    :placeholder="configPlaceholder()"></textarea>
+          <p x-show="configError" class="text-red-500 text-xs mt-1" x-text="configError"></p>
+        </div>
+      </template>
+
+      <div class="flex items-center gap-2 pt-1">
+        <input type="checkbox" id="enabled" x-model="form.enabled" class="rounded" />
+        <label for="enabled" class="text-sm">Enabled</label>
+      </div>
+
+      <div class="flex justify-end gap-3 pt-2">
+        <button @click="modal = false"
+                class="px-4 py-2 text-sm rounded-lg border hover:bg-gray-50">Cancel</button>
+        <button @click="save()"
+                class="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700">
+          Save
+        </button>
+      </div>
+    </div>
+  </div><!-- /modal -->
+
+</div>
+
+<style>
+.input  { @apply w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400; }
+.label  { @apply block text-xs font-medium text-gray-600 mb-0.5; }
+</style>
+
+<script>
+function mappingsApp() {
+  return {
+    mappings: [],
+    modal: false,
+    editId: null,
+    configJson: '{}',
+    configError: '',
+    form: { name: '', input_pattern: '', input_type: 'exact_hex', output_type: 'http', enabled: true },
+
+    // --- sequence state ---
+    seqParallel: false,
+    seqActions: [],
+
+    // --- ramp state ---
+    ramp: {
+      from_value: 0.0, to_value: 0.8, duration_ms: 5000,
+      fps: 25, easing: 'linear',
+      actionType: 'ui24r', actionConfigJson: '', error: ''
+    },
+
+    async load() {
+      const r = await fetch('/api/mappings/');
+      this.mappings = await r.json();
+    },
+
+    openCreate() {
+      this.editId = null;
+      this.form = { name: '', input_pattern: '', input_type: 'exact_hex', output_type: 'http', enabled: true };
+      this.configJson = JSON.stringify(this.defaultConfig('http'), null, 2);
+      this.configError = '';
+      this.seqParallel = false;
+      this.seqActions = [];
+      this._resetRamp();
+      this.modal = true;
+    },
+
+    openEdit(m) {
+      this.editId = m.id;
+      this.form = { name: m.name, input_pattern: m.input_pattern,
+                    input_type: m.input_type, output_type: m.output_type, enabled: m.enabled };
+      this.configError = '';
+
+      if (m.output_type === 'sequence') {
+        this.seqParallel = m.output_config.parallel || false;
+        this.seqActions = (m.output_config.actions || []).map(a => ({
+          output_type: a.output_type,
+          delay_before_ms: a.delay_before_ms || 0,
+          configJson: JSON.stringify(a.output_config || {}, null, 2),
+          error: ''
+        }));
+      } else if (m.output_type === 'ramp') {
+        const c = m.output_config;
+        this.ramp = {
+          from_value: c.from_value ?? 0,
+          to_value: c.to_value ?? 1,
+          duration_ms: c.duration_ms ?? 5000,
+          fps: c.fps ?? 25,
+          easing: c.easing ?? 'linear',
+          actionType: c.action?.output_type ?? 'ui24r',
+          actionConfigJson: JSON.stringify(c.action?.output_config || {}, null, 2),
+          error: ''
+        };
+      } else {
+        this.configJson = JSON.stringify(m.output_config, null, 2);
+      }
+      this.modal = true;
+    },
+
+    onOutputTypeChange() {
+      if (this.form.output_type === 'sequence') {
+        if (this.seqActions.length === 0)
+          this.seqActions.push({ output_type: 'ui24r', delay_before_ms: 0,
+            configJson: JSON.stringify(this.defaultConfig('ui24r'), null, 2), error: '' });
+      } else if (this.form.output_type === 'ramp') {
+        this._resetRamp();
+      } else {
+        this.configJson = JSON.stringify(this.defaultConfig(this.form.output_type), null, 2);
+      }
+    },
+
+    _resetRamp() {
+      this.ramp = {
+        from_value: 0.0, to_value: 0.8, duration_ms: 5000, fps: 25, easing: 'linear',
+        actionType: 'ui24r',
+        actionConfigJson: JSON.stringify({
+          host: '192.168.1.100', port: 80, commands: ['SETD^i.0.mix^{value}']
+        }, null, 2),
+        error: ''
+      };
+    },
+
+    rampSteps() {
+      const fps = this.ramp.fps || 25;
+      const dur = this.ramp.duration_ms || 0;
+      return Math.max(1, Math.ceil(dur / (1000 / fps)));
+    },
+
+    async toggleEnabled(m) {
+      const r = await fetch(`/api/mappings/${m.id}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: !m.enabled })
+      });
+      if (r.ok) m.enabled = !m.enabled;
+    },
+
+    async save() {
+      let cfg;
+      try {
+        cfg = this._buildOutputConfig();
+        this.configError = '';
+      } catch (e) {
+        this.configError = e.message;
+        return;
+      }
+      const payload = { ...this.form, output_config: cfg };
+      const url = this.editId ? `/api/mappings/${this.editId}` : '/api/mappings/';
+      const method = this.editId ? 'PUT' : 'POST';
+      const r = await fetch(url, {
+        method, headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (r.ok) { await this.load(); this.modal = false; }
+      else { const d = await r.json(); alert(JSON.stringify(d.detail)); }
+    },
+
+    _buildOutputConfig() {
+      if (this.form.output_type === 'sequence') {
+        const actions = this.seqActions.map((a, i) => {
+          let cfg;
+          try { cfg = JSON.parse(a.configJson); a.error = ''; }
+          catch (e) { a.error = e.message; throw new Error(`Action ${i+1}: invalid JSON — ${e.message}`); }
+          return { output_type: a.output_type, delay_before_ms: a.delay_before_ms || 0, output_config: cfg };
+        });
+        return { parallel: this.seqParallel, actions };
+      }
+
+      if (this.form.output_type === 'ramp') {
+        let actionCfg;
+        try { actionCfg = JSON.parse(this.ramp.actionConfigJson); this.ramp.error = ''; }
+        catch (e) { this.ramp.error = e.message; throw new Error('Ramp action: invalid JSON — ' + e.message); }
+        return {
+          from_value: this.ramp.from_value,
+          to_value: this.ramp.to_value,
+          duration_ms: this.ramp.duration_ms,
+          fps: this.ramp.fps,
+          easing: this.ramp.easing,
+          action: { output_type: this.ramp.actionType, output_config: actionCfg }
+        };
+      }
+
+      // generic types
+      try { const c = JSON.parse(this.configJson); this.configError = ''; return c; }
+      catch (e) { throw new Error('Invalid JSON: ' + e.message); }
+    },
+
+    async remove(id) {
+      if (!confirm('Delete this mapping?')) return;
+      await fetch(`/api/mappings/${id}`, { method: 'DELETE' });
+      await this.load();
+    },
+
+    badgeClass(type) {
+      const m = {
+        http: 'bg-blue-100 text-blue-700', udp: 'bg-purple-100 text-purple-700',
+        tcp: 'bg-yellow-100 text-yellow-700', mqtt: 'bg-orange-100 text-orange-700',
+        ui24r: 'bg-teal-100 text-teal-700', sequence: 'bg-pink-100 text-pink-700',
+        ramp: 'bg-indigo-100 text-indigo-700'
+      };
+      return m[type] || 'bg-gray-100 text-gray-600';
+    },
+
+    defaultConfig(type) {
+      const d = {
+        http:  { url: 'http://api.local/trigger', method: 'POST', headers: {}, body: '{"data":"${raw_data}"}', timeout: 10 },
+        udp:   { host: '192.168.1.100', port: 5006, data: '${raw_data}' },
+        tcp:   { host: '192.168.1.100', port: 9000, data: '${raw_data}', timeout: 10 },
+        mqtt:  { broker: 'mqtt.local', port: 1883, topic: 'udp/events', payload: '${raw_data}', qos: 0 },
+        ui24r: { host: '192.168.1.100', port: 80, commands: ['SETD^i.0.mute^1'], delay_ms: 0 },
+        ramp:  { from_value: 0.0, to_value: 0.8, duration_ms: 5000, fps: 25, easing: 'linear',
+                 action: { output_type: 'ui24r', output_config: { host: '192.168.1.100', port: 80, commands: ['SETD^i.0.mix^{value}'] } } },
+        sequence: { parallel: false, actions: [
+          { output_type: 'ui24r', delay_before_ms: 0, output_config: { host: '192.168.1.100', port: 80, commands: ['SETD^i.0.mute^0'] } },
+          { output_type: 'ramp',  delay_before_ms: 100, output_config: { from_value: 0.0, to_value: 0.8, duration_ms: 5000, fps: 25, easing: 'ease_out', action: { output_type: 'ui24r', output_config: { host: '192.168.1.100', port: 80, commands: ['SETD^i.0.mix^{value}'] } } } }
+        ]}
+      };
+      return d[type] || {};
+    },
+
+    configPlaceholder() {
+      return JSON.stringify(this.defaultConfig(this.form.output_type), null, 2);
+    }
+  };
+}
+</script>
+{% endblock %}
